@@ -35,6 +35,7 @@ hidden2 = tf.nn.relu(tf.matmul(hidden1_drop, W2) + b2)
 hidden2_drop = tf.nn.dropout(hidden2, keep_prob)
 y = tf.nn.sigmoid(tf.matmul(hidden2_drop, W3))
 
+#cross entropy is the real y * log (predicted y) + (1- real y) * log (1 - predicted y)
 cross_entropy = -tf.reduce_mean(y_ * tf.log(tf.clip_by_value(y, 1e-10, 1.0)))
 train_step = tf.train.AdamOptimizer(0.001).minimize(cross_entropy)
 
@@ -57,13 +58,13 @@ with tf.Session() as sess:
 
     STEPS = 5000
     for i in range(STEPS):
-        start = (i*batch_size) % 30
-        end = (i*batch_size) % 30 + batch_size
+        start = (i*batch_size) % 130
+        end = (i*batch_size) % 130 + batch_size
         sess.run(train_step, feed_dict={x: X_train[start:end], y_: Y_train[start:end], keep_prob: 1.0})
         if i % 1000 == 0:
-            total_cross_entropy = sess.run(cross_entropy, feed_dict={x: X_train, y_: Y_train, keep_prob: 1.0})
+            y_pred,total_cross_entropy = sess.run((y,cross_entropy), feed_dict={x: X_train, y_: Y_train, keep_prob: 1.0})
             print("After %d training step(s), cross entropy on all data is %g" % (i, total_cross_entropy))
-
-    pre_Y = sess.run(y, feed_dict={x: X_test, keep_prob: 1.0})
-    for pred, real in zip(pre_Y, Y_test):
-        print(pred, real)
+            print("training y and real y difference:",Y_train[0:2], y_pred[0:2])
+    # pre_Y = sess.run(y, feed_dict={x: X_test, keep_prob: 1.0})
+    # for pred, real in zip(pre_Y, Y_test):
+    #     print(pred, real)
