@@ -14,6 +14,7 @@ import MLP_tf_model
 BATCH_SIZE = 8
 data_num = 10425
 STEPS = data_num // BATCH_SIZE + 1  # STEPS = number of batches
+# 问题 epoch下面为什么没有显示了？
 EPOCH = 50
 
 
@@ -41,9 +42,9 @@ with tf.Session() as sess:
         end = (i*BATCH_SIZE) % 130 + BATCH_SIZE
         # 问题 为什么这里也有keep_pro这个参数？
         # 问题 这里的model.y_指的是训练集对应的label呗
-        sess.run(model.train_step, feed_dict={model.x: X_train[start:end], model.y_: Y_train[start:end], model.keep_prob: 1.0})
+        sess.run(model.train_step, feed_dict={model.x: X_train[start:end], model.y_: Y_train[start:end]})
         if i % 1000 == 0:
-            y_pred, total_cross_entropy = sess.run((model.y, model.loss), feed_dict={model.x: X_train, model.y_: Y_train, model.keep_prob: 1.0})
+            y_pred, total_cross_entropy = sess.run((model.y, model.loss), feed_dict={model.x: X_train, model.y_: Y_train})
             print("After %d training step(s), cross entropy on all data is %g" % (i, total_cross_entropy))
             print("training y and real y difference:", Y_train[0:2], y_pred[0:2])
     # pre_Y = sess.run(y, feed_dict={x: X_test, keep_prob: 1.0})
