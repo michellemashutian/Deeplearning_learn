@@ -116,8 +116,8 @@ class CitationRecNet(object):
 
         score_aa = tf.matmul(aq, tf.transpose(ak))
         score_ab = tf.matmul(aq, tf.transpose(bk))
-        divide_s_aa = score_aa/(self.layer1_dim**0.5)
-        divide_s_ab = score_ab/(self.layer1_dim**0.5)
+        divide_s_aa = score_aa/(tf.sqrt(float(self.layer1_dim)))
+        divide_s_ab = score_ab/(tf.sqrt(float(self.layer1_dim)))
         softmax_aa = tf.nn.softmax(divide_s_aa)  #70*70
         softmax_ab = tf.nn.softmax(divide_s_ab)
         az = tf.matmul(softmax_aa, av) + tf.matmul(softmax_ab, bv)
