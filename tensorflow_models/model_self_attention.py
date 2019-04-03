@@ -14,6 +14,7 @@ from numpy.random import RandomState
 from tensorflow.contrib.layers.python.layers import batch_norm as batch_norm  # for batch normalization
 import numpy as np
 from tensorflow.python.training.moving_averages import assign_moving_average
+import math
 
 class Config(object):
     def __init__(self, args):
@@ -53,19 +54,18 @@ class CitationRecNet(object):
         self.xa = tf.placeholder(tf.float32, shape=(None, self.x_dim1), name='xa-input')
         self.xb = tf.placeholder(tf.float32, shape=(None, self.x_dim2), name='xb-input')
         self.y = tf.placeholder(tf.float32, shape=(None, self.y_dim), name='y-input')
-
         """
         graph structure
         """
         # predict data: label
         self.y_pred = self.MLP()
-        # self.y_pred = tf.clip_by_value(self.MLP(), 1e-10, 1.0)
         self.y_pred_softmax = tf.nn.softmax(self.y_pred)
 
         """
         model training 
         """
-        self.loss = tf.reduce_logsumexp(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.y_pred, labels=self.y))
+        # reduce_logsumexp
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.y_pred, labels=self.y))
         self.loss_metric = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.y_pred, labels=self.y))
 
         # optimizer
@@ -76,19 +76,12 @@ class CitationRecNet(object):
 
     def MLP(self):
         with tf.variable_scope("layer1"):
-            self.Wak = tf.get_variable("wak", initializer=tf.random_normal([self.x_dim1, self.layer1_dim], stddev=0.1),
+            self.Wk = tf.get_variable("wak", initializer=tf.random_normal([self.x_dim1, self.layer1_dim], stddev=0.1),
                                       dtype=tf.float32)
-            self.Waq = tf.get_variable("waq", initializer=tf.random_normal([self.x_dim1, self.layer1_dim], stddev=0.1),
+            self.Wq = tf.get_variable("waq", initializer=tf.random_normal([self.x_dim1, self.layer1_dim], stddev=0.1),
                                       dtype=tf.float32)
-            self.Wav = tf.get_variable("wav", initializer=tf.random_normal([self.x_dim1, self.layer1_dim], stddev=0.1),
+            self.Wv = tf.get_variable("wav", initializer=tf.random_normal([self.x_dim1, self.layer1_dim], stddev=0.1),
                                       dtype=tf.float32)
-            self.Wbk = tf.get_variable("wbk", initializer=tf.random_normal([self.x_dim1, self.layer1_dim], stddev=0.1),
-                                      dtype=tf.float32)
-            self.Wbq = tf.get_variable("wbq", initializer=tf.random_normal([self.x_dim1, self.layer1_dim], stddev=0.1),
-                                      dtype=tf.float32)
-            self.Wbv = tf.get_variable("wbv", initializer=tf.random_normal([self.x_dim1, self.layer1_dim], stddev=0.1),
-                                      dtype=tf.float32)
-
         with tf.variable_scope("layer2"):
             self.W21 = tf.get_variable("w21",
                                       initializer=tf.random_normal([self.layer1_dim, self.layer2_dim], stddev=0.1),
@@ -101,7 +94,7 @@ class CitationRecNet(object):
 
         with tf.variable_scope("layer3"):
             self.W3 = tf.get_variable("w3",
-                                      initializer=tf.random_normal([self.layer2_dim*2, self.layer3_dim], stddev=0.1),
+                                      initializer=tf.random_normal([self.layer2_dim, self.layer3_dim], stddev=0.1),
                                       dtype=tf.float32)
             self.b3 = tf.get_variable("b3", initializer=tf.zeros([self.layer3_dim]), dtype=tf.float32)
 
@@ -114,32 +107,42 @@ class CitationRecNet(object):
         """
         first layer: self attention
         """
-        ak = tf.matul(self.xa, self.Wak)
-        aq = tf.matul(self.xa, self.Waq)
-        av = tf.matul(self.xa, self.Wav)
-        bk = tf.matul(self.xb, self.Wbk)
-        bq = tf.matul(self.xb, self.Wbq)
-        bv = tf.matul(self.xb, self.Wbv)
+        ak = tf.matmul(self.xa, self.Wk)
+        aq = tf.matmul(self.xa, self.Wq)
+        av = tf.matmul(self.xa, self.Wv)
+        bk = tf.matmul(self.xb, self.Wk)
+        bq = tf.matmul(self.xb, self.Wq)
+        bv = tf.matmul(self.xb, self.Wv)
 
-        az = tf.matmul(tf.nn.softmax(tf.multiply(aq, tf.transpose(ak))/(self.layer1_dim**0.5)), av)
-        bz = tf.matmul(tf.nn.softmax(tf.multiply(bq, tf.transpose(bk))/(self.layer1_dim**0.5)), bv)
+        score_aa = tf.matmul(aq, tf.transpose(ak))
+        score_ab = tf.matmul(aq, tf.transpose(bk))
+        divide_s_aa = score_aa/(self.layer1_dim**0.5)
+        divide_s_ab = score_ab/(self.layer1_dim**0.5)
+        softmax_aa = tf.nn.softmax(divide_s_aa)  #70*70
+        softmax_ab = tf.nn.softmax(divide_s_ab)
+        az = tf.matmul(softmax_aa, av) + tf.matmul(softmax_ab, bv)
 
-        hidden11_drop = tf.nn.dropout(az, self.dropout_keep)
-        hidden12_drop = tf.nn.dropout(bz, self.dropout_keep)
+        score_ba = tf.matmul(bq, tf.transpose(ak))
+        score_bb = tf.matmul(bq, tf.transpose(bk))
+        divide_s_ba = score_ba/(self.layer1_dim**0.5)
+        divide_s_bb = score_bb/(self.layer1_dim**0.5)
+        softmax_ba = tf.nn.softmax(divide_s_ba)
+        softmax_bb = tf.nn.softmax(divide_s_bb)
+        bz = tf.matmul(softmax_ba, av) + tf.matmul(softmax_bb, bv)
+
+        hidden11 = tf.nn.dropout(az+bz, self.dropout_keep)
+        hidden11_drop = tf.nn.dropout(hidden11, self.dropout_keep)
 
         """
         second layer: MLP
         """
-        hidden21 = tf.nn.sigmoid(tf.matmul(hidden11_drop, self.W21) + self.b21)
-        hidden22 = tf.nn.sigmoid(tf.matmul(hidden12_drop, self.W22) + self.b22)
-
+        hidden21 = tf.nn.relu(tf.matmul(hidden11_drop, self.W21) + self.b21)
         hidden21_drop = tf.nn.dropout(hidden21, self.dropout_keep)
-        hidden22_drop = tf.nn.dropout(hidden22, self.dropout_keep)
 
         """
         third layer: concat
         """
-        hidden3 = tf.nn.sigmoid(tf.matmul(tf.concat([hidden21_drop, hidden22_drop], axis=1), self.W3) + self.b3)
+        hidden3 = tf.nn.sigmoid(tf.matmul(hidden21_drop, self.W3) + self.b3)
         hidden3_drop = tf.nn.dropout(hidden3, self.dropout_keep)
 
         """
