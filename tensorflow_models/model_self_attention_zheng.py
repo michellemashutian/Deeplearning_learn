@@ -14,7 +14,6 @@ from numpy.random import RandomState
 from tensorflow.contrib.layers.python.layers import batch_norm as batch_norm  # for batch normalization
 import numpy as np
 from tensorflow.python.training.moving_averages import assign_moving_average
-import math
 
 class Config(object):
     def __init__(self, args):
@@ -54,36 +53,37 @@ class CitationRecNet(object):
         self.xa = tf.placeholder(tf.float32, shape=(None, self.x_dim1), name='xa-input')
         self.xb = tf.placeholder(tf.float32, shape=(None, self.x_dim2), name='xb-input')
         self.y = tf.placeholder(tf.float32, shape=(None, self.y_dim), name='y-input')
+
         """
         graph structure
         """
         # predict data: label
         self.y_pred = self.MLP()
+        # self.y_pred = tf.clip_by_value(self.MLP(), 1e-10, 1.0)
         self.y_pred_softmax = tf.nn.softmax(self.y_pred)
 
         """
         model training 
         """
-        # reduce_logsumexp
-        self.loss = tf.reduce_logsumexp(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.y_pred, labels=self.y))
+        self.loss = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.y_pred, labels=self.y))
         self.loss_metric = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.y_pred, labels=self.y))
 
         # optimizer
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate, name='optimizer')
-        # self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate,
-        #                                            decay=0.9, momentum=0.0, epsilon=1e-10, name='optimizer')
+        # self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate, name='optimizer')
+        self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate,
+                                                   decay=0.9, momentum=0.0, epsilon=1e-10, name='optimizer')
         self.train_op = self.optimizer.minimize(self.loss, name='train_op')
 
     def MLP(self):
         with tf.variable_scope("attention"):
-            self.Wk = tf.get_variable("wak", initializer=tf.random_normal([self.x_dim1, self.layer1_dim], stddev=0.1),
+            self.W = tf.get_variable("W", initializer=tf.random_normal([self.x_dim1, self.layer1_dim], stddev=0.1),
                                       dtype=tf.float32)
-            self.Wq = tf.get_variable("waq", initializer=tf.random_normal([self.x_dim1, self.layer1_dim], stddev=0.1),
+            self.V = tf.get_variable("V", initializer=tf.random_normal([self.layer1_dim, 1], stddev=0.1),
                                       dtype=tf.float32)
-            self.Wv = tf.get_variable("wav", initializer=tf.random_normal([self.x_dim1, self.layer1_dim], stddev=0.1),
-                                      dtype=tf.float32)
+            self.b = tf.get_variable("b", initializer=tf.zeros([self.layer1_dim]), dtype=tf.float32)
+
         with tf.variable_scope("layer1"):
-            self.W1 = tf.get_variable("w1", initializer=tf.random_normal([self.layer1_dim, self.layer2_dim], stddev=0.1),
+            self.W1 = tf.get_variable("w1", initializer=tf.random_normal([self.x_dim1, self.layer2_dim], stddev=0.1),
                                       dtype=tf.float32)
             self.b1 = tf.get_variable("b1", initializer=tf.zeros([self.layer2_dim]), dtype=tf.float32)
 
@@ -104,46 +104,18 @@ class CitationRecNet(object):
                                       initializer=tf.truncated_normal([self.layer4_dim, self.y_dim], stddev=0.1),
                                       dtype=tf.float32)
 
-
         """
-        first layer: self attention
+        attention layer
         """
-        ak = tf.matmul(self.xa, self.Wk)
-        aq = tf.matmul(self.xa, self.Wq)
-        av = tf.matmul(self.xa, self.Wv)
-        bk = tf.matmul(self.xb, self.Wk)
-        bq = tf.matmul(self.xb, self.Wq)
-        bv = tf.matmul(self.xb, self.Wv)
 
-        aqak = tf.multiply(aq, ak)/(self.layer1_dim**0.5)
-        aqak = tf.reduce_sum(aqak, 1, keepdims=True)
-        aqbk = tf.multiply(aq, bk)/(self.layer1_dim**0.5)
-        aqbk = tf.reduce_sum(aqbk, 1, keepdims=True)
-        bqak = tf.multiply(bq, ak)/(self.layer1_dim**0.5)
-        bqak = tf.reduce_sum(bqak, 1, keepdims=True)
-        bqbk = tf.multiply(bq, bk)/(self.layer1_dim**0.5)
-        bqbk = tf.reduce_sum(bqbk, 1, keepdims=True)
+        weight_a = tf.matmul((tf.matmul(self.xa, self.W) + self.b), self.V)
+        weight_b = tf.matmul((tf.matmul(self.xb, self.W) + self.b), self.V)
+        weight_a = tf.exp(weight_a) / (tf.exp(weight_a) + tf.exp(weight_b))
+        weight_b = tf.exp(weight_b) / (tf.exp(weight_a) + tf.exp(weight_b))
+        new_a = tf.multiply(weight_a, self.xa)
+        new_b = tf.multiply(weight_b, self.xa)
 
-        expaqak = tf.exp(tf.clip_by_value(aqak, 1e-10, 1.0))
-        expaqbk = tf.exp(tf.clip_by_value(aqbk, 1e-10, 1.0))
-        expbqak = tf.exp(tf.clip_by_value(bqak, 1e-10, 1.0))
-        expbqbk = tf.exp(tf.clip_by_value(bqbk, 1e-10, 1.0))
-
-        expsum = tf.add(expaqak, expaqbk)
-        expsum = tf.add(expsum, expbqak)
-        expsum = tf.add(expsum, expbqbk)
-        softmax_aqak = tf.divide(expaqak, expsum)
-        softmax_aqbk = tf.divide(expaqbk, expsum)
-        softmax_bqak = tf.divide(expbqak, expsum)
-        softmax_bqbk = tf.divide(expbqbk, expsum)
-
-        az = tf.add(tf.multiply(softmax_aqak, av), tf.multiply(softmax_aqbk, bv))
-        bz = tf.add(tf.multiply(softmax_bqak, av), tf.multiply(softmax_bqbk, bv))
-
-        print(az)
-        print(bz)
-
-        hidden1 = tf.nn.relu(tf.matmul(az+bz, self.W1) + self.b1)
+        hidden1 = tf.nn.relu(tf.matmul(new_a+new_b, self.W1) + self.b1)
         hidden1_drop = tf.nn.dropout(hidden1, self.dropout_keep)
 
         hidden2 = tf.nn.relu(tf.matmul(hidden1_drop, self.W2) + self.b2)

@@ -14,7 +14,7 @@ from sklearn import preprocessing
 from numpy.random import RandomState
 import numpy as np
 
-from model_self_attention import Config, CitationRecNet
+from model_self_attention_zheng import Config, CitationRecNet
 
 
 def parse_args():
@@ -26,8 +26,8 @@ def parse_args():
                         help='data path')
     parser.add_argument('--layer1-dim', type=int, default=70, help='layer1 dimension')
     parser.add_argument('--layer2-dim', type=int, default=50, help='layer2 dimension')
-    parser.add_argument('--layer3-dim', type=int, default=80, help='layer3 dimension')
-    parser.add_argument('--layer4-dim', type=int, default=20, help='layer3 dimension')
+    parser.add_argument('--layer3-dim', type=int, default=30, help='layer3 dimension')
+    parser.add_argument('--layer4-dim', type=int, default=15, help='layer3 dimension')
     parser.add_argument('--learning-rate', type=float, default=0.001, help=' ')
     parser.add_argument('--epoch', type=int, default=60, help=' ')
     parser.add_argument('--batch-size', type=int, default=8, help=' ')
@@ -114,11 +114,11 @@ def run(args):
         saver = tf.train.Saver()
         init_op = tf.global_variables_initializer()
         sess.run(init_op)
-
         max_acc = 0
-        min_cross = 100.0
+        min_cross = 2.0
 
         for i in range(config.EPOCH):
+            print(i)
             for j in range(STEPS):
                 start = (j * BATCH_SIZE) % DATA_NUM
                 end = ((j + 1) * BATCH_SIZE) % DATA_NUM
@@ -136,10 +136,9 @@ def run(args):
                     y_pred, total_cross_entropy = sess.run((model.y_pred_softmax, model.loss_metric),
                                                                 feed_dict={model.xa: X_test1, model.xb: X_test2, model.y: Y_test,
                                                                            model.dropout_keep: 1.0})
-
                     if min_cross > total_cross_entropy:
                         min_cross = total_cross_entropy
-                    #     # model_path = args.saved_model+"model-cross.ckpt"
+                        # model_path = args.saved_model+"model-cross.ckpt"
                         print("/epoch_%s-batch_%s-total_cross_entropy_%s" % (i, j, total_cross_entropy))
                         # saver.save(sess, model_path)
                         # output = open((args.path + 'output-filter'), 'w')
